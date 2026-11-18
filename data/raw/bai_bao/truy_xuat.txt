@@ -1,0 +1,2 @@
+Tóm tắt
+Trong thí nghiệm minh họa, phương pháp truy xuất được đánh giá bằng Recall@5. Chỉ số này đo tỷ lệ đoạn bằng chứng liên quan xuất hiện trong năm kết quả đầu tiên.

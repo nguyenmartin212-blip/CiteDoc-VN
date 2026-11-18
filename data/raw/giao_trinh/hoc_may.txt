@@ -1,0 +1,2 @@
+Chương 1. Đánh giá mô hình
+Tập huấn luyện được dùng để ước lượng tham số của mô hình. Tập kiểm thử được dùng để đánh giá mô hình đã chọn trên dữ liệu chưa từng dùng để huấn luyện hay chọn mô hình.

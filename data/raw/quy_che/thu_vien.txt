@@ -1,0 +1,5 @@
+Điều 1. Thời hạn mượn
+Sinh viên được mượn tài liệu trong 14 ngày kể từ ngày nhận sách.
+
+Điều 2. Gia hạn
+Sinh viên được gia hạn một lần nếu tài liệu chưa có người đăng ký mượn tiếp.
