@@ -17,7 +17,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("data/processed/chunks.jsonl"))
     parser.add_argument("--size", type=int, default=120)
     parser.add_argument("--overlap", type=int, default=20)
+    parser.add_argument(
+        "--pdf-native-order", action="append", default=[], metavar="DOC_ID",
+        help="Giữ thứ tự văn bản gốc của PDF được chỉ định bằng doc_id. Có thể lặp lại.",
+    )
     args = parser.parse_args()
+    native_order_ids = set(args.pdf_native_order)
 
     try:
         chunker = FixedWordChunker(args.size, args.overlap)
@@ -28,8 +33,15 @@ def main() -> None:
                 if not path.is_file() or path.suffix.lower() not in {".pdf", ".txt"}:
                     continue
                 doc_id = path.relative_to(args.input).as_posix()
-                chunks.extend(chunker.split(read_document(path, doc_id, domain)))
+                native_order = path.suffix.lower() == ".pdf" and doc_id in native_order_ids
+                document = read_document(path, doc_id, domain, pdf_native_order=native_order)
+                chunks.extend(chunker.split(document))
+                if native_order:
+                    native_order_ids.remove(doc_id)
                 count += 1
+        if native_order_ids:
+            unknown = ", ".join(sorted(native_order_ids))
+            raise ValueError(f"Không tìm thấy PDF được chỉ định bởi --pdf-native-order: {unknown}")
         if not count:
             raise ValueError(f"Không tìm thấy PDF hoặc TXT trong các thư mục miền tại {args.input}")
         if args.output.suffix.lower() != ".jsonl":

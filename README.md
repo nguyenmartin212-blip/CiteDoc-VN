@@ -25,3 +25,13 @@ Có thể đổi thư mục đầu vào bằng `--input` và đường dẫn JSO
 Mặc định, chương trình ghi `data/processed/chunks.jsonl`. Mỗi dòng lưu định danh đoạn, đường dẫn tài liệu tương đối, văn bản gốc, vị trí trang trong file PDF tính từ 1 (có thể khác số in trên trang), đề mục nhận diện được và miền tài liệu. Với TXT, trường trang là `null`. Cửa sổ chia đoạn tính theo cụm ký tự phân cách bằng khoảng trắng, giới hạn trong từng trang và đề mục nhận diện được.
 
 `data/eval/questions.jsonl` có ba câu hỏi mẫu. Mỗi câu gắn với tài liệu, trang và trích đoạn nguyên văn để có thể đối chiếu khi đổi cách chia đoạn. Nội dung minh họa do dự án tự soạn và chưa đại diện cho bộ đánh giá chính thức.
+
+### PDF nhiều cột
+
+Mặc định PDF được đọc theo vị trí trên trang. Nếu cách này trộn hai cột và PDF đã lưu văn bản theo thứ tự đọc, chọn thứ tự gốc riêng cho tài liệu đó:
+
+```powershell
+python -m citedoc.prepare --pdf-native-order bai_bao/ten_bai.pdf
+```
+
+Dùng đường dẫn tương đối dưới thư mục đầu vào, với dấu `/`. Có thể lặp lại cờ cho nhiều PDF. Kiểm tra một trang mẫu vì thứ tự lưu trong PDF phụ thuộc vào tài liệu. Văn bản đầu/chân trang có thể xuất hiện trong đoạn; số trang trích dẫn luôn lấy từ vị trí vật lý trong file.

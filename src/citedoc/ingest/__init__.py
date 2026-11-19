@@ -4,7 +4,9 @@ from unicodedata import normalize
 from citedoc.schemas import Document, Domain, Page
 
 
-def read_document(path: Path, doc_id: str, domain: Domain) -> Document:
+def read_document(
+    path: Path, doc_id: str, domain: Domain, *, pdf_native_order: bool = False
+) -> Document:
     suffix = path.suffix.lower()
     if suffix == ".txt":
         pages = [Page(None, normalize("NFC", path.read_text(encoding="utf-8-sig")))]
@@ -21,7 +23,7 @@ def read_document(path: Path, doc_id: str, domain: Domain) -> Document:
                 if pdf.needs_pass:
                     raise ValueError(f"PDF yêu cầu mật khẩu: {path}")
                 pages = [
-                    Page(number, normalize("NFC", page.get_text(sort=True)))
+                    Page(number, normalize("NFC", page.get_text(sort=not pdf_native_order)))
                     for number, page in enumerate(pdf, start=1)
                 ]
         except pymupdf.FileDataError as exc:
