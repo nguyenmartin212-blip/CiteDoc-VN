@@ -1,12 +1,15 @@
 from pathlib import Path
+from unicodedata import normalize
 
 from citedoc.schemas import Document, Domain, Page
 
 
-def read_document(path: Path, doc_id: str, domain: Domain) -> Document:
+def read_document(
+    path: Path, doc_id: str, domain: Domain, *, pdf_native_order: bool = False
+) -> Document:
     suffix = path.suffix.lower()
     if suffix == ".txt":
-        pages = [Page(None, path.read_text(encoding="utf-8-sig"))]
+        pages = [Page(None, normalize("NFC", path.read_text(encoding="utf-8-sig")))]
     elif suffix == ".pdf":
         try:
             import pymupdf
@@ -15,13 +18,19 @@ def read_document(path: Path, doc_id: str, domain: Domain) -> Document:
                 raise
             raise ValueError("Cần cài PyMuPDF để đọc PDF.") from exc
 
-        with pymupdf.open(path) as pdf:
-            if pdf.needs_pass:
-                raise ValueError(f"PDF yêu cầu mật khẩu: {path}")
-            pages = [
-                Page(number, page.get_text(sort=True))
-                for number, page in enumerate(pdf, start=1)
-            ]
+        try:
+            with pymupdf.open(path) as pdf:
+                if pdf.needs_pass:
+                    raise ValueError(f"PDF yêu cầu mật khẩu: {path}")
+                pages = [
+                    Page(number, normalize("NFC", page.get_text(sort=not pdf_native_order)))
+                    for number, page in enumerate(pdf, start=1)
+                ]
+        except pymupdf.FileDataError as exc:
+            raise ValueError(f"Không đọc được PDF {path}: {exc}") from exc
+
+        if not any(page.text.strip() for page in pages):
+            raise ValueError(f"PDF không có văn bản trích xuất được; nếu là bản scan, cần OCR: {path}")
     else:
         raise ValueError(f"Định dạng chưa hỗ trợ: {path}")
 
