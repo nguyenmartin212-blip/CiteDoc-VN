@@ -1,0 +1,9 @@
+Chương 1. Nguy cơ rò rỉ dữ liệu
+Rò rỉ dữ liệu là tình huống mô hình học từ thông tin vốn không có sẵn tại thời điểm dự đoán.
+
+Chương 2. Vai trò của pipeline
+Pipeline giúp học các phép tiền xử lý từ phần dữ liệu huấn luyện trong từng lần đánh giá.
+Chia dữ liệu trước khi điều chỉnh phép biến đổi để hạn chế rò rỉ từ tập kiểm thử.
+
+Nguồn tham khảo: scikit-learn, Common pitfalls and recommended practices.
+https://scikit-learn.org/stable/common_pitfalls.html

@@ -139,7 +139,7 @@ export function qaView({ draft, result, example, controller, error }) {
     </div>` : ''}`;
 }
 
-export function libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError }) {
+export function libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError, ocr }) {
   const doc = documents.find(({ id }) => id === selectedDocument?.id);
   const chunks = selectedDocument?.chunks;
   return `${pageTitle('Kho tài liệu', 'Thư viện tài liệu', 'Thêm tài liệu và xem văn bản theo trang, điều hoặc mục.')}
@@ -156,6 +156,8 @@ export function libraryView({ documents, selectedDocument, upload, libraryLoadin
     </form>
     <section class="panel table-card">
       <div class="section-title"><h2>Danh sách tài liệu</h2><span class="pill neutral">${documents.length} tài liệu</span></div>
+      ${ocr.id ? '<p class="empty" role="status">Đang nhận dạng văn bản và cập nhật chỉ mục…</p>' : ''}
+      ${ocr.message ? `<p class="empty ${ocr.error ? 'notice-error' : ''}" role="status">${escape(ocr.message)}</p>` : ''}
       ${libraryLoading ? '<p class="empty" role="status">Đang tải thư viện…</p>' : ''}
       ${libraryError ? `<p class="empty notice-error" role="alert">${escape(libraryError)}
         <button type="button" class="text-button" data-action="reload-library">Thử lại</button></p>` : ''}
@@ -167,7 +169,8 @@ export function libraryView({ documents, selectedDocument, upload, libraryLoadin
           <td><span class="pill ${item.needsOcr ? 'caution' : 'success'}">${icon(item.needsOcr ? 'warning' : 'check', 13)}
             ${item.needsOcr ? 'Cần OCR' : 'Đã xử lý'}</span></td>
           <td><button type="button" class="text-button" data-action="document" data-id="${escape(item.id)}"
-            aria-controls="document-preview" aria-expanded="${doc === item}">${doc === item ? 'Đang xem' : 'Xem đoạn'}</button></td>
+            aria-controls="document-preview" aria-expanded="${doc === item}">${doc === item ? 'Đang xem' : 'Xem đoạn'}</button>
+          ${item.needsOcr ? `<button type="button" class="text-button ocr-button" data-action="ocr" data-id="${escape(item.id)}" ${ocr.id ? 'disabled' : ''}>Chạy OCR</button>` : ''}</td>
         </tr>`).join('')}</tbody>
       </table></div>
     </section>
@@ -183,17 +186,20 @@ export function libraryView({ documents, selectedDocument, upload, libraryLoadin
 }
 
 export function compareView({ draft, result, controller, error }) {
-  const intro = `${pageTitle('Đối chiếu', 'So sánh câu trả lời', 'Đối chiếu đoạn xếp hạng đầu và câu trả lời đã lọc theo bằng chứng.')}
+  const intro = `${pageTitle('Đối chiếu', 'So sánh câu trả lời', 'Đối chiếu quy tắc trích xuất với AI cục bộ trên cùng các đoạn truy xuất.')}
     ${queryForm('compare', draft, 'So sánh')}${lookupStatus(controller, error)}`;
   if (!result) return intro;
   const baseline = result.hits[0];
+  const ai = result.ai;
   return `${intro}
     <div class="compare-grid">
-      <article class="panel comparison"><h2>Chỉ thuật toán</h2><p class="small">Đoạn có điểm truy xuất cao nhất</p>
-        <p class="serif">${baseline ? `${escape(baseline.quote)} ${citeButton(0, 'rank')}` : 'Không có kết quả truy xuất.'}</p></article>
-      <article class="panel comparison"><h2>Trả lời trích xuất</h2><p class="small">Câu trả lời dựa trên văn bản gốc</p>
+      <article class="panel comparison"><h2>Thuật toán thuần</h2><p class="small">Chọn câu theo quy tắc trích xuất</p>
         <p class="serif">${escape(result.answer.text)} ${result.answer.abstained ? '' : citeButton(result.citationIndex, 'rank')}</p>
         ${result.verified ? '<span class="pill success">Đã đối chiếu trích đoạn</span>' : ''}
+      </article>
+      <article class="panel comparison"><h2>Thuật toán + AI</h2><p class="small">${ai ? escape(ai.model) : 'Mô hình cục bộ'}</p>
+        ${ai?.answer ? `<p class="serif">${escape(ai.answer.text)} ${[...new Set(ai.citationIndices)].map((index) => citeButton(index, 'rank')).join(' ')}</p>`
+          : `<p class="small">${escape(ai?.error ?? 'Khởi động mô hình theo hướng dẫn trong README để dùng phần so sánh.')}</p>`}
       </article>
     </div>
     <section class="panel table-card"><div class="section-title"><h2>Đoạn truy xuất</h2><span class="pill neutral">${retrievers[result.config.retrieval]}</span></div>
@@ -212,21 +218,22 @@ function metric(value) {
   return value == null ? '—' : value.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function experimentView({ experiment, experimentDomain, labRows, labTopK, yamlFile, yamlError }) {
-  return `${pageTitle('Đánh giá pipeline', 'Thí nghiệm', 'Đo khả năng tìm lại đoạn bằng chứng trên bộ câu hỏi mẫu của dự án.')}
+export function experimentView({ experiment, experimentDomain, experimentSplit, labRows, labTopK, labSplit, yamlFile, yamlError }) {
+  return `${pageTitle('Đánh giá pipeline', 'Thí nghiệm', 'Đo khả năng truy xuất, trích dẫn và từ chối trên tập câu hỏi có gán nhãn.')}
     <div class="experiment-nav" role="group" aria-label="Chọn thí nghiệm">
       ${Object.entries(experiments).map(([id, label]) => `<button type="button" class="button secondary"
         data-action="experiment" data-id="${id}" aria-pressed="${id === experiment}">${id.toUpperCase()} ${label}</button>`).join('')}
     </div>
     <form id="experiment" class="panel lab-config">
       ${select('experimentDomain', 'Miền đánh giá', domains, experimentDomain)}
+      ${select('experimentSplit', 'Tập đánh giá', { test: 'Kiểm tra · 24 câu', dev: 'Phát triển · 20 câu' }, experimentSplit)}
       <label class="field yaml-field"><span>Cấu hình YAML (tùy chọn)</span><input type="file" accept=".yaml,.yml" name="yaml">
         ${yamlFile ? `<small>${escape(yamlFile)}</small>` : ''}</label>
       <button class="button primary" type="submit">Chạy thí nghiệm</button>
       ${yamlError ? `<p class="notice notice-error" role="status">${escape(yamlError)}</p>` : ''}
     </form>
     <section class="panel table-card" aria-live="polite">
-      <div class="section-title"><h2>Kết quả đánh giá</h2><button class="button secondary" type="button" data-action="export" ${labRows ? '' : 'disabled'}>
+      <div class="section-title"><div><h2>Kết quả đánh giá</h2>${labRows ? `<p class="small">${labSplit === 'test' ? 'Tập kiểm tra' : 'Tập phát triển'}</p>` : ''}</div><button class="button secondary" type="button" data-action="export" ${labRows ? '' : 'disabled'}>
         ${icon('download', 16)} Xuất CSV</button></div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="Kết quả đánh giá"><table>
         <thead><tr><th scope="col">Cấu hình</th><th scope="col">Recall@${labTopK}</th><th scope="col">MRR</th><th scope="col">nDCG@${labTopK}</th><th scope="col">Trích dẫn đúng</th><th scope="col">Đã đối chiếu</th><th scope="col">Từ chối đúng</th></tr></thead>

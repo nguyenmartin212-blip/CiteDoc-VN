@@ -1,8 +1,8 @@
-import json
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Annotated
 from urllib.parse import quote
 from uuid import uuid4
@@ -12,10 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 
 from citedoc.answering import ABSTENTION, answer_question
-from citedoc.catalog import Catalog, Strategy
-from citedoc.evaluation import evaluate
-from citedoc.ingest import read_document, read_upload
-from citedoc.prepare import DOMAINS
+from citedoc.catalog import Catalog, Strategy, seed_catalog
+from citedoc.evaluation import Split, evaluate, in_domain, load_dataset
+from citedoc.ingest import ocr_pdf, read_upload
+from citedoc.local_ai import LocalReader, ReaderUnavailable
 from citedoc.retrieval import Retrieval, rank
 from citedoc.schemas import Answer, Chunk, Document, Domain
 
@@ -42,29 +42,33 @@ class Question(BaseModel):
     config: Settings = Field(default_factory=Settings)
 
 
+class EvaluationSettings(Settings):
+    split: Split = "dev"
+
+
 def excerpt(chunk: Chunk) -> dict:
     return {"id": chunk.id, "page": chunk.page, "heading": chunk.section, "quote": chunk.text}
 
 
-def create_app(database: Path, *, sample_dir: Path = ROOT / "data/raw", ui_dir: Path = ROOT / "ui/dist") -> FastAPI:
+def create_app(
+    database: Path, *, sample_dir: Path = ROOT / "data/raw", ui_dir: Path = ROOT / "ui/dist",
+    tessdata: Path | None = None, reader: LocalReader | None = None,
+) -> FastAPI:
     catalog = Catalog(database)
+    ocr_lock = Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        catalog.initialize()
-        existing = {doc["id"] for doc in catalog.documents()}
-        for domain in DOMAINS:
-            for path in sorted((sample_dir / domain).glob("*.txt")):
-                doc_id = path.relative_to(sample_dir).as_posix()
-                if doc_id not in existing:
-                    catalog.add(read_document(path, doc_id, domain), path.read_bytes(), "section", sample=True)
+        seed_catalog(catalog, sample_dir)
         yield
 
     app = FastAPI(title="CiteDoc-VN", lifespan=lifespan)
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "ocr": bool(tessdata and all(
+            (tessdata / f"{language}.traineddata").is_file() for language in ("vie", "eng")
+        )), "aiModel": reader.model if reader else None}
 
     @app.get("/api/documents")
     def documents():
@@ -88,6 +92,30 @@ def create_app(database: Path, *, sample_dir: Path = ROOT / "data/raw", ui_dir: 
         saved, created = catalog.add(document, content, strategy)
         return {"document": saved, "created": created}
 
+    @app.post("/api/documents/ocr")
+    def recognize(id: str):
+        document = catalog.document(id)
+        if document is None:
+            raise HTTPException(404, "Không tìm thấy tài liệu.")
+        if Path(document["name"]).suffix.lower() != ".pdf":
+            raise HTTPException(422, "OCR chỉ áp dụng cho PDF.")
+        if not health()["ocr"]:
+            raise HTTPException(503, "Chưa cài dữ liệu OCR tiếng Việt và tiếng Anh.")
+        with ocr_lock:
+            pages = catalog.pages(id)
+            pending = sum(not page.text.strip() for page in pages)
+            if not pending:
+                return {"document": catalog.document(id), "recognized": 0}
+            source = catalog.original(id)
+            try:
+                result = ocr_pdf(source["original"], pages, tessdata)
+                if sum(len(page.text) for page in result) > 2_000_000:
+                    raise ValueError("Văn bản trích xuất vượt quá 2 triệu ký tự.")
+            except (RuntimeError, ValueError) as exc:
+                raise HTTPException(422, f"Không thể OCR PDF: {exc}") from exc
+            updated = catalog.update_pages(Document(id, Path(document["name"]), document["domain"], result))
+            return {"document": updated, "recognized": pending - sum(not page.text.strip() for page in result)}
+
     @app.get("/api/documents/chunks")
     def chunks(id: str):
         document = catalog.document(id)
@@ -107,32 +135,46 @@ def create_app(database: Path, *, sample_dir: Path = ROOT / "data/raw", ui_dir: 
             "X-Content-Type-Options": "nosniff",
         })
 
-    @app.post("/api/ask")
-    def ask(request: Question):
+    def answer_payload(request: Question, compare_ai: bool):
         config = request.config
         chunks = catalog.chunks(config.strategy, domain=config.domain)
         hits = rank(chunks, request.question, config.retrieval, config.topK, config.normalize)
-        answer = answer_question(request.question, hits)
-        citation_index = None
-        if answer.citations:
-            citation = answer.citations[0]
-            if catalog.verify(citation.doc_id, citation.page, citation.quote):
-                citation_index = next(i for i, hit in enumerate(hits) if hit.chunk.id == citation.chunk_id)
-            else:
-                answer = Answer(ABSTENTION, [], True)
+        def checked(answer: Answer) -> tuple[Answer, list[int]]:
+            indices = {hit.chunk.id: index for index, hit in enumerate(hits)}
+            if any(citation.chunk_id not in indices or not catalog.verify(
+                citation.doc_id, citation.page, citation.quote,
+            ) for citation in answer.citations):
+                return Answer(ABSTENTION, [], True), []
+            return answer, [indices[citation.chunk_id] for citation in answer.citations]
+
+        answer, citation_indices = checked(answer_question(request.question, hits))
+        ai = None
+        if compare_ai and reader:
+            try:
+                selected, indices = checked(reader.answer(request.question, hits))
+                ai = {"model": reader.model, "answer": asdict(selected), "citationIndices": indices}
+            except ReaderUnavailable as exc:
+                ai = {"model": reader.model, "error": str(exc)}
         doc_metadata = {doc["id"]: doc for doc in catalog.documents()}
         return {
             "question": request.question, "config": config.model_dump(), "answer": asdict(answer),
-            "citationIndex": citation_index, "verified": config.verify and citation_index is not None,
+            "citationIndex": citation_indices[0] if citation_indices else None,
+            "verified": config.verify and bool(citation_indices), "ai": ai,
             "hits": [{**excerpt(hit.chunk), "score": hit.score, "doc": doc_metadata[hit.chunk.doc_id]} for hit in hits],
         }
 
+    @app.post("/api/ask")
+    def ask(request: Question):
+        return answer_payload(request, False)
+
+    @app.post("/api/compare")
+    def compare(request: Question):
+        return answer_payload(request, True)
+
     @app.post("/api/evaluate")
-    def run_evaluation(config: Settings):
-        with (ROOT / "data/eval/questions.jsonl").open(encoding="utf-8") as dataset:
-            rows = [json.loads(line) for line in dataset if line.strip()]
-        examples = [row for row in rows if (row.get("domain") or row["doc_id"].split("/")[0]) == config.domain]
-        corpus = catalog.chunks(config.strategy, domain=config.domain)
+    def run_evaluation(config: EvaluationSettings):
+        examples = in_domain(load_dataset(ROOT / "data/eval", config.split), config.domain)
+        corpus = [chunk for chunk in catalog.chunks(config.strategy, domain=config.domain) if chunk.doc_id.startswith(f"{config.domain}/")]
         return evaluate(catalog, corpus, examples, config.retrieval, config.topK, config.normalize, config.verify)
 
     if ui_dir.is_dir():
@@ -140,4 +182,10 @@ def create_app(database: Path, *, sample_dir: Path = ROOT / "data/raw", ui_dir: 
     return app
 
 
-app = create_app(Path(os.environ.get("CITEDOC_DB", ROOT / "data/processed/catalog.sqlite3")))
+runtime = ROOT / "data/processed/runtime"
+ai_model = os.environ.get("CITEDOC_AI_MODEL")
+app = create_app(
+    Path(os.environ.get("CITEDOC_DB", ROOT / "data/processed/catalog.sqlite3")),
+    tessdata=Path(os.environ.get("CITEDOC_TESSDATA", runtime / "tessdata")),
+    reader=LocalReader(int(os.environ.get("CITEDOC_AI_PORT", "8081")), ai_model) if ai_model else None,
+)

@@ -19,10 +19,11 @@ function post(path, payload, signal) {
   });
 }
 
-export const askQuestion = (question, config, signal) => post('ask', { question, config }, signal);
+export const askQuestion = (question, config, signal, compare) => post(compare ? 'compare' : 'ask', { question, config }, signal);
 export const runEvaluation = (config) => post('evaluate', config);
 export const listDocuments = () => request('documents');
 export const listChunks = (id) => request(`documents/chunks?${new URLSearchParams({ id })}`);
+export const recognizeDocument = (id) => request(`documents/ocr?${new URLSearchParams({ id })}`, { method: 'POST' });
 export const sourceUrl = (id, page) => `/api/documents/file?${new URLSearchParams({ id })}${page ? `#page=${page}` : ''}`;
 
 export function uploadDocument(file, domain, strategy) {

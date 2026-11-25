@@ -1,5 +1,9 @@
+import os
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
+from shutil import copyfile
+from tempfile import TemporaryDirectory
 from unicodedata import normalize
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -66,6 +70,40 @@ def read_upload(name: str, content: bytes) -> list[Page]:
     if not text.strip():
         raise ValueError("Tệp không có văn bản để lập chỉ mục.")
     return [Page(None, normalize("NFC", text))]
+
+
+def ocr_pdf(content: bytes, pages: list[Page], tessdata: Path) -> list[Page]:
+    import pymupdf
+
+    with _ocr_data_path(tessdata) as data_path, pymupdf.open(stream=content, filetype="pdf") as pdf:
+        output = list(pages)
+        for index, previous in enumerate(pages):
+            if previous.text.strip():
+                continue
+            page = pdf[index]
+            area = max(1, page.rect.width * page.rect.height)
+            dpi = min(200, int(72 * (12_000_000 / area) ** 0.5))
+            if dpi < 72:
+                raise ValueError("Kích thước trang PDF vượt giới hạn OCR bản demo.")
+            try:
+                layer = page.get_textpage_ocr(language="vie+eng", dpi=dpi, full=True, tessdata=str(data_path))
+            except pymupdf.mupdf.FzErrorBase as exc:
+                raise ValueError("Tesseract không đọc được trang hoặc dữ liệu ngôn ngữ.") from exc
+            output[index] = Page(previous.number, normalize("NFC", page.get_text(textpage=layer, sort=True)))
+        return output
+
+
+@contextmanager
+def _ocr_data_path(tessdata: Path):
+    # Tesseract uses narrow Windows paths to open language data.
+    if os.name != "nt" or str(tessdata.resolve()).isascii():
+        yield tessdata
+        return
+    with TemporaryDirectory(prefix="citedoc-tessdata-") as folder:
+        path = Path(folder)
+        for name in ("eng.traineddata", "vie.traineddata"):
+            copyfile(tessdata / name, path / name)
+        yield path
 
 
 def _word_text(content: bytes) -> str:

@@ -1,7 +1,7 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/source-serif-4';
 import './style.css';
-import { askQuestion, listChunks, listDocuments, runEvaluation, uploadDocument } from './api.js';
+import { askQuestion, listChunks, listDocuments, recognizeDocument, runEvaluation, uploadDocument } from './api.js';
 import { defaults, domains, examples, retrievers, strategies } from './settings.js';
 import { compareView, experimentView, libraryView, navigation, qaView, sidebar } from './views.js';
 
@@ -19,10 +19,13 @@ let documents = [];
 let libraryLoading = false;
 let libraryError = '';
 let selectedDocument = null;
+const ocr = { id: null, message: '', error: false };
 let experiment = 'e2';
 let experimentDomain = settings.domain;
+let experimentSplit = 'test';
 let labRows = null;
 let labTopK = settings.topK;
+let labSplit = experimentSplit;
 let yamlFile = '';
 let yamlError = '';
 
@@ -32,13 +35,13 @@ function render() {
   const selection = editing ? [field.selectionStart, field.selectionEnd] : null;
   switch (route) {
     case 'thu-vien':
-      main.innerHTML = libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError });
+      main.innerHTML = libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError, ocr });
       break;
     case 'so-sanh':
       main.innerHTML = compareView(lookups.compare);
       break;
     case 'thi-nghiem':
-      main.innerHTML = experimentView({ experiment, experimentDomain, labRows, labTopK, yamlFile, yamlError });
+      main.innerHTML = experimentView({ experiment, experimentDomain, experimentSplit, labRows, labTopK, labSplit, yamlFile, yamlError });
       break;
     default:
       main.innerHTML = qaView({ ...lookups.ask, example: examples[settings.domain] });
@@ -58,7 +61,7 @@ async function query(id, question) {
   if (lookupRoutes[route] === id) render();
 
   try {
-    const result = await askQuestion(question, settings, controller.signal);
+    const result = await askQuestion(question, settings, controller.signal, id === 'compare');
     if (lookup.controller === controller) lookup.result = result;
   } catch (error) {
     if (error.name !== 'AbortError' && lookup.controller === controller) lookup.error = error.message;
@@ -181,6 +184,28 @@ async function showDocument(id, focus) {
   }
 }
 
+async function recognize(id) {
+  if (ocr.id) return;
+  Object.assign(ocr, { id, message: '', error: false });
+  render();
+  try {
+    const { document, recognized } = await recognizeDocument(id);
+    documents = documents.map((item) => item.id === id ? document : item);
+    ocr.message = recognized ? `Đã đọc và lập chỉ mục ${recognized} trang. ${document.needsOcr ? 'Một số trang vẫn chưa nhận dạng được.' : ''}`
+      : 'Không nhận dạng được thêm văn bản từ các trang còn lại.';
+    if (selectedDocument?.id === id) {
+      const preview = selectedDocument;
+      preview.chunks = await listChunks(id);
+    }
+    refreshResults();
+  } catch (error) {
+    Object.assign(ocr, { message: error.message, error: true });
+  } finally {
+    ocr.id = null;
+    if (route === 'thu-vien') render();
+  }
+}
+
 function labVariants(config, id) {
   switch (id) {
     case 'e1':
@@ -223,17 +248,19 @@ async function runLab(form) {
   button.disabled = true;
   const file = form.elements.yaml.files[0];
   const id = experiment;
+  const split = experimentSplit;
   const base = { ...settings, domain: experimentDomain };
   try {
     const overrides = file ? await readYaml(file) : {};
     if (!form.isConnected) return;
     const config = { ...base, ...overrides };
     const rows = await Promise.all(labVariants(config, id).map(async ({ label, config: variant }) => ({
-      label, stats: await runEvaluation(variant),
+      label, stats: await runEvaluation({ ...variant, split }),
     })));
     if (!form.isConnected) return;
     labRows = rows;
     labTopK = config.topK;
+    labSplit = split;
     yamlFile = file ? `Đã dùng ${file.name}` : '';
     yamlError = '';
     experimentDomain = config.domain;
@@ -249,9 +276,9 @@ async function runLab(form) {
 
 function exportResults() {
   if (!labRows) return;
-  const rows = [`Cấu hình,Recall@${labTopK},MRR,nDCG@${labTopK},Trích dẫn đúng,Đã đối chiếu,Câu có đáp án,Từ chối đúng,Câu thiếu bằng chứng`];
+  const rows = [`Tập đánh giá,Cấu hình,Recall@${labTopK},MRR,nDCG@${labTopK},Trích dẫn đúng,Đã đối chiếu,Câu có đáp án,Từ chối đúng,Câu thiếu bằng chứng`];
   for (const { label, stats } of labRows) {
-    rows.push([label, stats.recall, stats.mrr, stats.ndcg, stats.correct, stats.verified,
+    rows.push([labSplit, label, stats.recall, stats.mrr, stats.ndcg, stats.correct, stats.verified,
       stats.positives, stats.abstentions, stats.negatives].join(','));
   }
   const url = URL.createObjectURL(new Blob(['\uFEFF', rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
@@ -296,6 +323,7 @@ main.addEventListener('change', ({ target }) => {
   if (target.name === 'uploadDomain') upload.domain = target.value;
   if (target.name === 'uploadStrategy') upload.strategy = target.value;
   if (target.name === 'experimentDomain') experimentDomain = target.value;
+  if (target.name === 'experimentSplit') experimentSplit = target.value;
 });
 
 main.addEventListener('submit', (event) => {
@@ -332,6 +360,9 @@ main.addEventListener('click', (event) => {
     }
     case 'document':
       void showDocument(id, true);
+      break;
+    case 'ocr':
+      void recognize(id);
       break;
     case 'reload-library':
       void loadLibrary();

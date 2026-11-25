@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import os
 from contextlib import ExitStack
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +10,10 @@ import pymupdf
 from fastapi.testclient import TestClient
 
 from citedoc.api import create_app
+from citedoc.answering import ABSTENTION
+from citedoc.evaluation import annotations, load_dataset
+from citedoc.retrieval import fold
+from citedoc.schemas import Answer, Citation
 
 
 def pdf_with_pages(*texts: str) -> bytes:
@@ -104,3 +109,61 @@ class TestCiteDocAPI(unittest.TestCase):
                 self.assertEqual((stats["positives"], stats["negatives"]), counts)
                 self.assertGreater(stats["correct"], 0)
                 self.assertEqual(stats["abstentions"], 2)
+
+    def test_held_out_evidence_exists_and_has_distinct_questions(self):
+        folder = Path(__file__).resolve().parents[1] / "data/eval"
+        test = load_dataset(folder, "test")
+        self.assertEqual(len(test), 24)
+        dev_questions = {row["question"] for row in load_dataset(folder, "dev")}
+        self.assertTrue(all(row["question"] not in dev_questions for row in test))
+        for row in test:
+            for evidence in annotations(row):
+                original = self.client.get("/api/documents/file", params={"id": evidence["doc_id"]})
+                self.assertIn(evidence["evidence"], original.text)
+        result = self.client.post("/api/evaluate", json={"domain": "quy_che", "split": "test"}).json()
+        self.assertEqual((result["positives"], result["negatives"]), (5, 3))
+
+    def test_ai_endpoint_checks_source_integrity(self):
+        class Reader:
+            model = "test-reader"
+
+            def answer(self, question, hits):
+                first = hits[0].chunk
+                return Answer("invented", [Citation(first.id, first.doc_id, first.page, "invented")], False)
+
+        with TestClient(create_app(self.database, reader=Reader())) as comparison:
+            result = comparison.post("/api/compare", json={
+                "question": "Sinh viên được mượn tài liệu trong bao lâu?",
+            }).json()
+        self.assertFalse(result["answer"]["abstained"])
+        self.assertEqual(result["ai"]["answer"], {"text": ABSTENTION, "citations": [], "abstained": True})
+
+    def test_ocr_scan_updates_index_and_preserves_original(self):
+        root = Path(__file__).resolve().parents[1]
+        tessdata = Path(os.environ.get("CITEDOC_TESSDATA", root / "data/processed/runtime/tessdata"))
+        if not all((tessdata / (language + ".traineddata")).is_file() for language in ("vie", "eng")):
+            self.skipTest("Use scripts/setup-runtime.ps1 to enable real OCR integration.")
+        with pymupdf.open() as text, pymupdf.open() as scan:
+            page = text.new_page(width=520, height=150)
+            page.insert_text((45, 70), "Phong mo cua vao thu sau.", fontsize=22)
+            scan_page = scan.new_page(width=520, height=150)
+            scan_page.insert_image(scan_page.rect, pixmap=page.get_pixmap(dpi=160))
+            scanned = scan.tobytes()
+        item = self.upload("scan-regression.pdf", scanned)["document"]
+        self.assertTrue(item["needsOcr"])
+        with TestClient(create_app(self.database, tessdata=tessdata)) as client:
+            result = client.post("/api/documents/ocr", params={"id": item["id"]})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["recognized"], 1)
+            self.assertFalse(result.json()["document"]["needsOcr"])
+            chunks = client.get("/api/documents/chunks", params={"id": item["id"]}).json()
+            self.assertIn("thu sau", fold(chunks[0]["quote"]))
+            self.assertEqual(chunks[0]["page"], 1)
+            self.assertEqual(client.get("/api/documents/file", params={"id": item["id"]}).content, scanned)
+
+    def test_schedule_with_joined_ocr_words_keeps_the_right_subject(self):
+        sample = "Phòng mô phỏng mởcửa vào thứsáu.".encode()
+        item = self.upload("ocr-text.txt", sample)["document"]
+        result = self.ask("Phòng mô phỏng mở cửa vào ngày nào?")
+        self.assertEqual(result["answer"]["citations"][0]["doc_id"], item["id"])
+        self.assertEqual(result["answer"]["text"], sample.decode())

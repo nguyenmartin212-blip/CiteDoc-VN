@@ -1,4 +1,5 @@
 import re
+from unicodedata import normalize
 
 from citedoc.chunking import compact, sentences
 from citedoc.retrieval import STOP_WORDS, fold, words
@@ -27,14 +28,25 @@ RULES = (
     (r"the nao|nhu the nao|quy trinh", r"\b(?:buoc|truoc tien|sau do|phai|can nop)\b"),
 )
 
-TOPIC_STOP = set(words(STOP_WORDS, True)) | {
-    "may", "toi", "da", "nhat", "theo", "hay", "xin", "biet", "vui", "long", "giup", "can",
-}
+TOPIC_STOP = STOP_WORDS + " mấy tối đa nhất theo hãy xin biết vui lòng giúp cần thể"
+OCR_JOINED = re.compile(r"\b(mở|đóng)(cửa)\b|\b(thứ)(hai|ba|tư|năm|sáu|bảy)\b", re.IGNORECASE)
+
+
+def lexical_sentence(text: str) -> str:
+    # Vietnamese OCR may merge common schedule words. Keep the original in citations.
+    return OCR_JOINED.sub(lambda match: " ".join(value for value in match.groups() if value), text)
 
 
 def answer_question(question: str, hits: list[Hit]) -> Answer:
-    normalized = compact(fold(question))
-    normalized = re.sub(r"^(?:trong|theo) (?:giao trinh|tai lieu|quy che|bai bao)[,:]?\s+", "", normalized)
+    original = compact(normalize("NFC", question.casefold()))
+    normalized = fold(original)
+    unaccented = len(original) != len(normalized) or original == normalized
+    if unaccented:
+        original = normalized
+    prefix = re.match(r"^(?:trong|theo) (?:giao trinh|tai lieu|quy che|bai bao)[,:]?\s+", normalized)
+    if prefix:
+        original = original[prefix.end():]
+        normalized = normalized[prefix.end():]
     rule = next((
         (match, cue) for pattern, cue in RULES
         if (match := re.search(r"\b(?:" + pattern + r")", normalized))
@@ -43,17 +55,22 @@ def answer_question(question: str, hits: list[Hit]) -> Answer:
         return Answer(ABSTENTION, [], True)
 
     match, cue = rule
-    topic = set(words(normalized[:match.start()] + " " + normalized[match.end():], True)) - TOPIC_STOP
+    topic_text = original[:match.start()] + " " + original[match.end():]
+    topic = set(words(topic_text, unaccented)) - set(words(TOPIC_STOP, unaccented))
     if not topic:
         return Answer(ABSTENTION, [], True)
+    folded_topic = {fold(term) for term in topic}
     answer_cue = re.compile(cue.format(**match.groupdict()) if "{unit}" in cue else cue)
 
     for hit in hits:
         chunk = hit.chunk
-        heading = set(words(chunk.section or "", True))
         for sentence in sentences(chunk.text, chunk.section):
-            sentence_words = set(words(sentence, True))
-            if topic & sentence_words and topic <= sentence_words | heading and answer_cue.search(fold(sentence)):
+            searchable = lexical_sentence(sentence)
+            source = searchable + " " + (chunk.section or "")
+            use_fold = unaccented or source.casefold() == fold(source)
+            required = folded_topic if use_fold else topic
+            if (required & set(words(searchable, use_fold)) and required <= set(words(source, use_fold))
+                    and answer_cue.search(fold(searchable))):
                 citation = Citation(chunk.id, chunk.doc_id, chunk.page, sentence)
                 return Answer(sentence, [citation], False)
     return Answer(ABSTENTION, [], True)

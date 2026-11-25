@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 from citedoc.chunking import FixedWordChunker, compact, section_pages, sentences
-from citedoc.schemas import Chunk, Document, Domain
+from citedoc.ingest import read_document
+from citedoc.prepare import DOMAINS
+from citedoc.schemas import Chunk, Document, Domain, Page
 
 Strategy = Literal["section", "sentence", "fixed"]
 STRATEGIES: tuple[Strategy, ...] = ("section", "sentence", "fixed")
@@ -40,6 +42,13 @@ def metadata(row: sqlite3.Row) -> dict:
     }
 
 
+def index_rows(document: Document) -> list[tuple]:
+    return [
+        (document.id, kind, position, chunk.id, chunk.page, chunk.section, chunk.text)
+        for kind in STRATEGIES for position, chunk in enumerate(split_for_index(document, kind))
+    ]
+
+
 class Catalog:
     def __init__(self, path: Path):
         self.path = path
@@ -69,12 +78,9 @@ class Catalog:
 
     def add(self, document: Document, content: bytes, strategy: Strategy, *, sample: bool = False) -> tuple[dict, bool]:
         digest = hashlib.sha256(content).hexdigest()
-        needs_ocr = not any(page.text.strip() for page in document.pages)
+        needs_ocr = any(not page.text.strip() for page in document.pages)
         pages = json.dumps([asdict(page) for page in document.pages], ensure_ascii=False)
-        indexed = [
-            (document.id, kind, position, chunk.id, chunk.page, chunk.section, chunk.text)
-            for kind in STRATEGIES for position, chunk in enumerate(split_for_index(document, kind))
-        ]
+        indexed = index_rows(document)
         with closing(self.connect()) as db, db:
             inserted = db.execute("""
                 INSERT INTO documents (id, domain, name, strategy, sample, needs_ocr, digest, original, pages)
@@ -101,6 +107,22 @@ class Catalog:
         with closing(self.connect()) as db:
             return db.execute("SELECT name, original FROM documents WHERE id = ?", (doc_id,)).fetchone()
 
+    def pages(self, doc_id: str) -> list[Page]:
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT pages FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        return [Page(**page) for page in json.loads(row["pages"])] if row else []
+
+    def update_pages(self, document: Document) -> dict:
+        pages = json.dumps([asdict(page) for page in document.pages], ensure_ascii=False)
+        missing = any(not page.text.strip() for page in document.pages)
+        indexed = index_rows(document)
+        with closing(self.connect()) as db, db:
+            db.execute("UPDATE documents SET pages = ?, needs_ocr = ? WHERE id = ?", (pages, missing, document.id))
+            db.execute("DELETE FROM chunks WHERE doc_id = ?", (document.id,))
+            db.executemany("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?)", indexed)
+            row = db.execute(f"SELECT {METADATA} FROM documents WHERE id = ?", (document.id,)).fetchone()
+            return metadata(row)
+
     def chunks(self, strategy: Strategy, *, domain: Domain | None = None, doc_id: str | None = None) -> list[Chunk]:
         sql = """
             SELECT c.id, c.doc_id, c.text, c.page, c.section, d.domain
@@ -117,9 +139,17 @@ class Catalog:
             return [Chunk(**dict(row)) for row in db.execute(sql + " ORDER BY c.doc_id, c.position", params)]
 
     def verify(self, doc_id: str, number: int | None, quote: str) -> bool:
-        with closing(self.connect()) as db:
-            row = db.execute("SELECT pages FROM documents WHERE id = ?", (doc_id,)).fetchone()
-        return bool(row and any(
-            page["number"] == number and compact(quote) in compact(page["text"])
-            for page in json.loads(row["pages"])
+        normalized = compact(quote)
+        return bool(normalized and any(
+            page.number == number and normalized in compact(page.text) for page in self.pages(doc_id)
         ))
+
+
+def seed_catalog(catalog: Catalog, sample_dir: Path) -> None:
+    catalog.initialize()
+    existing = {doc["id"] for doc in catalog.documents()}
+    for domain in DOMAINS:
+        for path in sorted((sample_dir / domain).glob("*.txt")):
+            doc_id = path.relative_to(sample_dir).as_posix()
+            if doc_id not in existing:
+                catalog.add(read_document(path, doc_id, domain), path.read_bytes(), "section", sample=True)
