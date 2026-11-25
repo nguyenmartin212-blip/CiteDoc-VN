@@ -1,0 +1,6 @@
+Chương 1. Hồi quy tuyến tính
+Hồi quy tuyến tính là phương pháp mô hình hóa quan hệ tuyến tính giữa biến đầu vào và giá trị cần dự đoán.
+
+Chương 2. Sai số tuyệt đối
+MAE là trung bình của các sai số tuyệt đối giữa giá trị dự đoán và giá trị quan sát.
+Sai số tuyệt đối được dùng để đo độ lệch giữa dự đoán và quan sát.

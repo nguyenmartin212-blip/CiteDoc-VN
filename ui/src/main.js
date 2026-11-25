@@ -1,23 +1,23 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/source-serif-4';
 import './style.css';
-import { examples, readFile, sampleDocuments } from './documents.js';
-import { defaults, domains, evaluate, retrievers, runQuestion, strategies } from './pipeline.js';
+import { askQuestion, listChunks, listDocuments, runEvaluation, uploadDocument } from './api.js';
+import { defaults, domains, examples, retrievers, strategies } from './settings.js';
 import { compareView, experimentView, libraryView, navigation, qaView, sidebar } from './views.js';
 
 const settings = { ...defaults };
 const sidebarElement = document.querySelector('#sidebar');
 const main = document.querySelector('#main');
-const documents = [...sampleDocuments];
 const upload = { domain: settings.domain, strategy: settings.strategy, busy: false, message: '', error: false };
-const exampleFor = (domain) => examples.find(({ doc_id }) => doc_id.startsWith(`${domain}/`));
-const ask = (question) => runQuestion(documents, examples, question, { ...settings });
+const lookupRoutes = { 'hoi-dap': 'ask', 'so-sanh': 'compare' };
+const lookups = Object.fromEntries(Object.values(lookupRoutes).map((id) => [id, {
+  draft: examples[settings.domain], submitted: examples[settings.domain], result: null, error: '', controller: null,
+}]));
 
 let route;
-let question = exampleFor(settings.domain)?.question ?? '';
-let result = ask(question);
-let compareQuestion = question;
-let comparison = result;
+let documents = [];
+let libraryLoading = false;
+let libraryError = '';
 let selectedDocument = null;
 let experiment = 'e2';
 let experimentDomain = settings.domain;
@@ -27,18 +27,61 @@ let yamlFile = '';
 let yamlError = '';
 
 function render() {
+  const field = document.activeElement;
+  const editing = field?.name === 'question' && main.contains(field);
+  const selection = editing ? [field.selectionStart, field.selectionEnd] : null;
   switch (route) {
     case 'thu-vien':
-      main.innerHTML = libraryView({ documents, selectedDocument, upload });
+      main.innerHTML = libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError });
       break;
     case 'so-sanh':
-      main.innerHTML = compareView({ compareQuestion, comparison });
+      main.innerHTML = compareView(lookups.compare);
       break;
     case 'thi-nghiem':
       main.innerHTML = experimentView({ experiment, experimentDomain, labRows, labTopK, yamlFile, yamlError });
       break;
     default:
-      main.innerHTML = qaView({ question, result, example: exampleFor(settings.domain), algorithm: result.hits[0] });
+      main.innerHTML = qaView({ ...lookups.ask, example: examples[settings.domain] });
+  }
+  if (selection) {
+    const replacement = main.querySelector('[name="question"]');
+    replacement?.focus({ preventScroll: true });
+    replacement?.setSelectionRange(...selection);
+  }
+}
+
+async function query(id, question) {
+  const lookup = lookups[id];
+  lookup.controller?.abort();
+  const controller = new AbortController();
+  Object.assign(lookup, { submitted: question, result: null, error: '', controller });
+  if (lookupRoutes[route] === id) render();
+
+  try {
+    const result = await askQuestion(question, settings, controller.signal);
+    if (lookup.controller === controller) lookup.result = result;
+  } catch (error) {
+    if (error.name !== 'AbortError' && lookup.controller === controller) lookup.error = error.message;
+  } finally {
+    if (lookup.controller === controller) {
+      lookup.controller = null;
+      if (lookupRoutes[route] === id) render();
+    }
+  }
+}
+
+async function loadLibrary() {
+  if (libraryLoading) return;
+  libraryLoading = true;
+  libraryError = '';
+  if (route === 'thu-vien') render();
+  try {
+    documents = await listDocuments();
+  } catch (error) {
+    libraryError = error.message;
+  } finally {
+    libraryLoading = false;
+    if (route === 'thu-vien') render();
   }
 }
 
@@ -52,6 +95,9 @@ function goToRoute(moveFocus = false) {
   }
   document.title = `${navigation[route][0]} | CiteDoc-VN`;
   render();
+  const id = lookupRoutes[route];
+  if (id && !lookups[id].result && !lookups[id].controller) void query(id, lookups[id].submitted);
+  if (route === 'thu-vien' && !upload.busy) void loadLibrary();
   if (moveFocus) {
     main.focus({ preventScroll: true });
     window.scrollTo(0, 0);
@@ -59,15 +105,15 @@ function goToRoute(moveFocus = false) {
 }
 
 function refreshResults(previousDomain) {
-  const previousExample = exampleFor(previousDomain)?.question;
-  const nextExample = exampleFor(settings.domain)?.question ?? '';
-  if (previousDomain && previousExample) {
-    if (question === previousExample) question = nextExample;
-    if (compareQuestion === previousExample) compareQuestion = nextExample;
+  const previousExample = examples[previousDomain];
+  for (const [id, lookup] of Object.entries(lookups)) {
+    lookup.controller?.abort();
+    lookup.controller = null;
+    lookup.result = null;
+    if (previousExample && lookup.draft === previousExample) lookup.draft = examples[settings.domain];
+    if (previousExample && lookup.submitted === previousExample) lookup.submitted = examples[settings.domain];
+    if (lookupRoutes[route] === id) void query(id, lookup.submitted);
   }
-  result = ask(previousDomain && result.question === previousExample ? nextExample : result.question);
-  comparison = ask(previousDomain && comparison.question === previousExample ? nextExample : comparison.question);
-  if (route === 'hoi-dap' || route === 'so-sanh') render();
 }
 
 function updateStepper() {
@@ -84,24 +130,55 @@ async function importFiles(files) {
   render();
   const added = [];
   const errors = [];
+  let duplicates = 0;
   for (const file of files) {
     if (file.size > 10 * 1024 * 1024) {
       errors.push(`${file.name} vượt quá 10 MB.`);
       continue;
     }
     try {
-      added.push(await readFile(file, domain, strategy));
+      const { document: item, created } = await uploadDocument(file, domain, strategy);
+      if (created) added.push(item);
+      else duplicates += 1;
     } catch (error) {
       errors.push(`${file.name}: ${error.message || 'Không đọc được tệp.'}`);
     }
   }
-  documents.push(...added);
-  if (added.length) selectedDocument = added.at(-1).id;
   upload.busy = false;
   upload.error = errors.length > 0;
-  upload.message = [added.length ? `Đã thêm ${added.length} tài liệu.` : '', ...errors].filter(Boolean).join(' ');
+  upload.message = [
+    added.length ? `Đã thêm ${added.length} tài liệu.` : '',
+    duplicates ? `${duplicates} tài liệu đã có trong thư viện.` : '',
+    ...errors,
+  ].filter(Boolean).join(' ');
   refreshResults();
-  if (route === 'thu-vien') render();
+  if (route === 'thu-vien') {
+    await loadLibrary();
+    if (added.length && route === 'thu-vien') void showDocument(added.at(-1).id, false);
+  }
+}
+
+async function showDocument(id, focus) {
+  if (selectedDocument?.id === id) {
+    selectedDocument = null;
+    render();
+    if (focus) main.querySelector(`[data-id="${CSS.escape(id)}"]`)?.focus();
+    return;
+  }
+  const preview = { id, chunks: null, error: '' };
+  selectedDocument = preview;
+  render();
+  if (focus) main.querySelector('#document-preview')?.focus();
+  try {
+    preview.chunks = await listChunks(id);
+  } catch (error) {
+    preview.error = error.message;
+  }
+  if (selectedDocument === preview && route === 'thu-vien') {
+    const restoreFocus = document.activeElement?.id === 'document-preview';
+    render();
+    if (restoreFocus) main.querySelector('#document-preview')?.focus({ preventScroll: true });
+  }
 }
 
 function labVariants(config, id) {
@@ -151,9 +228,11 @@ async function runLab(form) {
     const overrides = file ? await readYaml(file) : {};
     if (!form.isConnected) return;
     const config = { ...base, ...overrides };
-    labRows = labVariants(config, id).map(({ label, config: variant }) => ({
-      label, stats: evaluate(documents, examples, variant),
-    }));
+    const rows = await Promise.all(labVariants(config, id).map(async ({ label, config: variant }) => ({
+      label, stats: await runEvaluation(variant),
+    })));
+    if (!form.isConnected) return;
+    labRows = rows;
     labTopK = config.topK;
     yamlFile = file ? `Đã dùng ${file.name}` : '';
     yamlError = '';
@@ -170,9 +249,10 @@ async function runLab(form) {
 
 function exportResults() {
   if (!labRows) return;
-  const rows = [`Cấu hình,Recall@${labTopK},MRR,nDCG@${labTopK},Số trích dẫn đã đối chiếu,Số câu hỏi`];
+  const rows = [`Cấu hình,Recall@${labTopK},MRR,nDCG@${labTopK},Trích dẫn đúng,Đã đối chiếu,Câu có đáp án,Từ chối đúng,Câu thiếu bằng chứng`];
   for (const { label, stats } of labRows) {
-    rows.push([label, stats?.recall, stats?.mrr, stats?.ndcg, stats?.verified, stats?.total].join(','));
+    rows.push([label, stats.recall, stats.mrr, stats.ndcg, stats.correct, stats.verified,
+      stats.positives, stats.abstentions, stats.negatives].join(','));
   }
   const url = URL.createObjectURL(new Blob(['\uFEFF', rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
@@ -208,8 +288,8 @@ sidebarElement.addEventListener('click', (event) => {
 });
 
 main.addEventListener('input', ({ target }) => {
-  if (target.form?.id === 'ask') question = target.value;
-  if (target.form?.id === 'compare') compareQuestion = target.value;
+  const lookup = lookups[target.form?.id];
+  if (lookup) lookup.draft = target.value;
 });
 
 main.addEventListener('change', ({ target }) => {
@@ -226,15 +306,9 @@ main.addEventListener('submit', (event) => {
   const field = form.elements.question;
   const input = field.value.trim();
   if (!input) return field.focus();
-  if (form.id === 'ask') {
-    question = input;
-    result = ask(question);
-  } else {
-    compareQuestion = input;
-    comparison = ask(compareQuestion);
-  }
-  render();
-  main.querySelector(`#${form.id} button`).focus({ preventScroll: true });
+  lookups[form.id].draft = input;
+  void query(form.id, input);
+  main.querySelector(`#${form.id} input`).focus({ preventScroll: true });
 });
 
 main.addEventListener('click', (event) => {
@@ -243,9 +317,8 @@ main.addEventListener('click', (event) => {
   const { action, id, target } = button.dataset;
   switch (action) {
     case 'example':
-      question = button.dataset.question;
-      result = ask(question);
-      render();
+      lookups.ask.draft = button.dataset.question;
+      void query('ask', button.dataset.question);
       main.querySelector('#ask input').focus({ preventScroll: true });
       break;
     case 'citation':
@@ -257,13 +330,12 @@ main.addEventListener('click', (event) => {
       field.select();
       break;
     }
-    case 'document': {
-      selectedDocument = selectedDocument === id ? null : id;
-      render();
-      if (selectedDocument) main.querySelector('#document-preview').focus();
-      else main.querySelector(`[data-id="${CSS.escape(id)}"]`).focus();
+    case 'document':
+      void showDocument(id, true);
       break;
-    }
+    case 'reload-library':
+      void loadLibrary();
+      break;
     case 'experiment':
       if (experiment === id) break;
       experiment = id;

@@ -115,6 +115,8 @@ button.citation:hover { background: #d8eaf3; }
 .source-title { font-weight: 675; font-size: 0.85rem; }
 .source-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-dark); }
 .source blockquote { margin-top: 0.65rem; color: #353b41; font: 1rem/1.55 var(--serif); }
+.source-link { margin-top: 0.5rem; font-size: 0.82rem; }
+.query + .lookup-status { margin-top: 1rem; }
 mark { background: #ffe58a; color: var(--ink); border-radius: 2px; box-decoration-break: clone; }
 .warning { background: #fff7dc; border-color: #e6d294; }
 .warning-icon { display: grid; place-items: center; width: 40px; height: 40px; background: #f8e8b6; color: #705113; border-radius: 8px; margin-bottom: 0.7rem; }

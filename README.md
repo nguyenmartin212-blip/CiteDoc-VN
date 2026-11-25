@@ -2,21 +2,26 @@
 
 Đồ án Machine Learning về hỏi đáp có trích dẫn trên tài liệu tiếng Việt. Mốc đầu tiên chuyển tài liệu của ba miền thành các đoạn JSONL có thông tin nguồn.
 
-## Chạy giao diện demo
+## Chạy CiteDoc-VN
 
-Cần Node.js 22.14 trở lên. Chạy từ thư mục gốc của repo:
+Cần Python 3.10 trở lên và Node.js 22.14 trở lên. Chạy từ thư mục gốc của repo trong PowerShell:
 
 ```powershell
-cd ui
-npm ci
-npm run dev
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm --prefix ui ci
+npm --prefix ui run build
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe -m uvicorn citedoc.api:app --host 127.0.0.1 --port 8000
 ```
 
-Mở `http://localhost:5173`. Dùng `npm run build` để tạo bản tĩnh trong `ui/dist` và `npm run preview` để xem bản build.
+Mở [CiteDoc-VN](http://127.0.0.1:8000/) để dùng giao diện hoặc [tài liệu API](http://127.0.0.1:8000/docs) để thử API. Khi sửa frontend, giữ backend chạy và dùng `npm --prefix ui run dev` trong terminal khác. Vite chuyển các yêu cầu `/api` đến cổng `8000`. Có thể đặt `CITEDOC_API_URL` trước khi chạy Vite nếu backend dùng cổng khác.
 
-- **Hỏi đáp** dùng văn bản trong `data/raw` và câu hỏi trong `data/eval`. Demo hiển thị đáp án mẫu khi tìm lại được đoạn bằng chứng, trích nguyên văn khi có đoạn liên quan, và từ chối khi bằng chứng quá ít. Truy xuất và chuẩn hóa chạy trong trình duyệt.
-- **Thư viện** đọc TXT UTF-8, DOCX và PDF có lớp văn bản trong phiên hiện tại. PDF scan hiện trạng thái cần OCR. Các tệp thêm vào thư viện được dùng ngay trong tra cứu theo miền đã chọn.
-- **So sánh** đối chiếu đoạn xếp hạng đầu với đáp án từ bộ câu hỏi mẫu. **Thí nghiệm** tính Recall@k, MRR và nDCG@k trực tiếp từ bộ mẫu và có thể xuất CSV. Tệp YAML tùy chọn nhận các trường `domain`, `strategy`, `retrieval`, `topK`, `normalize` và `verify`, ví dụ:
+- **Thư viện** nhập TXT UTF-8, văn bản chính trong DOCX và PDF có lớp văn bản. Tệp gốc, văn bản theo trang và các đoạn được lưu trong `data/processed/catalog.sqlite3`. Có thể đổi đường dẫn bằng `CITEDOC_DB`. Tệp trùng nội dung trong cùng miền dùng lại tài liệu đã lưu. PDF scan hiện trạng thái **Cần OCR**.
+- **Hỏi đáp** xếp hạng các đoạn trong miền đã chọn bằng BM25, TF-IDF hoặc Hybrid (kết hợp hai điểm lexical). Bộ trả lời trích xuất hỗ trợ các dạng câu hỏi như thời hạn, số lượng, điều kiện, vị trí và định nghĩa. Kết quả là câu nguyên văn trong tài liệu. Khi thiếu bằng chứng trực tiếp hoặc dạng câu hỏi nằm ngoài phạm vi hỗ trợ, hệ thống từ chối. Nút mở nguồn đưa người xem đến đúng số trang vật lý của PDF.
+- **So sánh** đối chiếu đoạn xếp hạng đầu với câu trả lời đã lọc theo bằng chứng. **Thí nghiệm** chạy backend trên 20 câu tổng hợp từ ba miền và có thể xuất CSV. Recall@k, MRR và nDCG@k tính trên nhóm có đáp án. Bảng còn hiển thị số trích dẫn đúng và số lần từ chối đúng ở nhóm thiếu bằng chứng. Bộ mẫu phục vụ kiểm tra và minh họa.
+
+Tệp YAML tùy chọn nhận các trường sau:
 
 ```yaml
 domain: quy_che
@@ -26,6 +31,16 @@ topK: 5
 normalize: true
 verify: true
 ```
+
+### Kiểm thử
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Ca kiểm thử tạo PDF hai trang, nhập qua API, hỏi một câu mới và xác nhận trích dẫn mở đúng trang 2 ngay cả sau khi khởi động lại. Các ca khác kiểm tra từ chối câu hỏi sai loại thông tin, tài liệu trùng, phạm vi miền, DOCX, PDF cần OCR và bộ đánh giá.
 
 ## Chạy trên PowerShell
 
@@ -49,7 +64,7 @@ Có thể đổi thư mục đầu vào bằng `--input` và đường dẫn JSO
 
 Mặc định, chương trình ghi `data/processed/chunks.jsonl`. Mỗi dòng lưu định danh đoạn, đường dẫn tài liệu tương đối, văn bản gốc, vị trí trang trong file PDF tính từ 1 (có thể khác số in trên trang), đề mục nhận diện được và miền tài liệu. Với TXT, trường trang là `null`. Cửa sổ chia đoạn tính theo cụm ký tự phân cách bằng khoảng trắng, giới hạn trong từng trang và đề mục nhận diện được.
 
-`data/eval/questions.jsonl` có ba câu hỏi mẫu. Mỗi câu gắn với tài liệu, trang và trích đoạn nguyên văn để có thể đối chiếu khi đổi cách chia đoạn. Nội dung minh họa do dự án tự soạn và chưa đại diện cho bộ đánh giá chính thức.
+`data/eval/questions.jsonl` gồm 14 câu có đáp án kèm tài liệu, trang và trích đoạn nguyên văn, cùng 6 câu thiếu bằng chứng gắn với miền đánh giá. Nội dung minh họa do dự án tự soạn.
 
 ### PDF nhiều cột
 

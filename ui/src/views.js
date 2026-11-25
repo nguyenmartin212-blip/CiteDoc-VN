@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
-import { domains, retrievers, splitDocument, strategies } from './pipeline.js';
+import { sourceUrl } from './api.js';
+import { domains, retrievers, strategies } from './settings.js';
 
 export const navigation = {
   'hoi-dap': ['Hỏi đáp', 'chat'], 'thu-vien': ['Thư viện', 'book'],
@@ -72,6 +73,7 @@ function location(hit) {
 }
 
 function citedQuote(quote, evidence) {
+  quote = quote.replace(/\s+/g, ' ').trim();
   if (evidence) {
     const start = quote.indexOf(evidence);
     if (start >= 0) {
@@ -79,7 +81,17 @@ function citedQuote(quote, evidence) {
       return `${escape(quote.slice(0, start))}<mark>${escape(evidence)}</mark>${escape(quote.slice(end))}`;
     }
   }
-  return `<mark>${escape(quote)}</mark>`;
+  return escape(quote);
+}
+
+function sourceLink(id, page) {
+  return `<a class="text-button" href="${escape(sourceUrl(id, page))}" target="_blank" rel="noopener">Mở tài liệu gốc</a>`;
+}
+
+function lookupStatus(controller, error) {
+  if (controller) return '<p class="empty panel lookup-status" role="status">Đang tra cứu tài liệu…</p>';
+  if (error) return `<p class="empty panel lookup-status notice-error" role="alert">${escape(error)}</p>`;
+  return '';
 }
 
 function citeButton(index, prefix) {
@@ -88,7 +100,7 @@ function citeButton(index, prefix) {
 }
 
 function sourceList(result, prefix, title = 'Nguồn trích dẫn') {
-  const { hits, source, example } = result;
+  const { hits, answer, citationIndex } = result;
   return `<aside class="sources" aria-label="${title}">
     <div class="sources-heading"><div><h2 class="eyebrow">${title}</h2><p>Đối chiếu với tài liệu gốc</p></div>
       <span class="pill neutral">${hits.length} đoạn</span></div>
@@ -97,45 +109,42 @@ function sourceList(result, prefix, title = 'Nguồn trích dẫn') {
         <div><div class="source-title">${escape(hit.doc.name)}</div><div class="small">${location(hit)}</div></div>
         <span class="citation label">[${index + 1}]</span>
       </div>
-      <blockquote>${source === hit ? citedQuote(hit.quote, example?.evidence) : escape(hit.quote)}</blockquote>
+      <blockquote>${citedQuote(hit.quote, index === citationIndex ? answer.citations[0].quote : null)}</blockquote>
+      <p class="source-link">${sourceLink(hit.doc.id, hit.page)}</p>
     </article>`).join('') || '<p class="empty panel">Không tìm thấy đoạn phù hợp trong miền này.</p>'}
   </aside>`;
 }
 
-export function qaView({ question, result, example, algorithm }) {
-  const citation = result.hits.indexOf(result.source);
-  const answer = result.example?.answer ?? result.source?.quote;
+export function qaView({ draft, result, example, controller, error }) {
   return `${pageTitle('Tra cứu tài liệu', 'Hỏi đáp có kiểm chứng', 'Đặt câu hỏi và đối chiếu câu trả lời với đoạn văn trong tài liệu gốc.')}
-    ${queryForm('ask', question, 'Hỏi')}
+    ${queryForm('ask', draft, 'Hỏi')}
     <div class="suggestions"><span>Câu hỏi mẫu</span>
-      ${example ? `<button type="button" data-action="example" data-question="${escape(example.question)}">${escape(example.question)}</button>` : ''}
+      ${example ? `<button type="button" data-action="example" data-question="${escape(example)}">${escape(example)}</button>` : ''}
       <button type="button" data-action="example" data-question="Học phí mỗi học kỳ là bao nhiêu?">Học phí chưa có dữ liệu</button>
     </div>
-    <div class="results-grid" aria-live="polite">
-      ${result.source ? `<article class="answer panel">
-        <header class="answer-heading"><h2 class="eyebrow">${result.example ? 'Câu trả lời' : 'Trích đoạn liên quan'}</h2>
+    ${lookupStatus(controller, error)}
+    ${result ? `<div class="results-grid" aria-live="polite">
+      ${!result.answer.abstained ? `<article class="answer panel">
+        <header class="answer-heading"><h2 class="eyebrow">Câu trả lời trích xuất</h2>
           <span class="pill ${result.verified ? 'success' : 'neutral'}">${icon(result.verified ? 'shield' : 'file', 14)}
-            ${result.verified ? 'Đã đối chiếu nguồn' : 'Chưa đối chiếu nguồn'}</span></header>
-        <p class="serif answer-text">${escape(answer)} ${citeButton(citation, 'source')}</p>
-        ${result.example ? `<details><summary>Xem đoạn thuật toán truy xuất</summary>
-          <p class="serif">${escape(algorithm?.quote ?? result.source.quote)}</p></details>` : ''}
-        <footer class="answer-footer">${icon('file', 15)} 1 đoạn hỗ trợ <span aria-hidden="true">·</span> ${result.example ? 'Bộ câu hỏi mẫu' : 'Trích dẫn nguyên văn'}</footer>
+            ${result.verified ? 'Đã đối chiếu trích đoạn' : 'Trích dẫn nguyên văn'}</span></header>
+        <p class="serif answer-text">${escape(result.answer.text)} ${citeButton(result.citationIndex, 'source')}</p>
       </article>` : `<article class="answer warning panel">
         <span class="warning-icon">${icon('warning', 22)}</span><h2>Không đủ bằng chứng để trả lời</h2>
-        <p>Tài liệu trong miền ${escape(domains[result.config.domain])} chưa có đoạn đủ sát với câu hỏi này.</p>
+        <p>Chưa tìm thấy câu trả lời trực tiếp trong các đoạn truy xuất ở miền ${escape(domains[result.config.domain])}.</p>
         <div class="actions"><a class="button primary" href="#thu-vien">Thêm tài liệu</a>
           <button class="button secondary" type="button" data-action="rephrase">Diễn đạt lại</button></div>
       </article>`}
-      ${sourceList(result, 'source', result.source ? 'Nguồn trích dẫn' : 'Đoạn đã truy xuất')}
-    </div>`;
+      ${sourceList(result, 'source', result.answer.abstained ? 'Đoạn đã truy xuất' : 'Nguồn trích dẫn')}
+    </div>` : ''}`;
 }
 
-export function libraryView({ documents, selectedDocument, upload }) {
-  const doc = documents.find(({ id }) => id === selectedDocument);
-  const chunks = doc ? splitDocument(doc, doc.strategy) : [];
+export function libraryView({ documents, selectedDocument, upload, libraryLoading, libraryError }) {
+  const doc = documents.find(({ id }) => id === selectedDocument?.id);
+  const chunks = selectedDocument?.chunks;
   return `${pageTitle('Kho tài liệu', 'Thư viện tài liệu', 'Thêm tài liệu và xem văn bản theo trang, điều hoặc mục.')}
     <form id="upload" class="panel upload" aria-busy="${upload.busy}">
-      <div class="section-title"><h2>Thêm tài liệu</h2><p class="small">Tệp được xử lý trong trình duyệt và lưu trong phiên hiện tại.</p></div>
+      <div class="section-title"><h2>Thêm tài liệu</h2><p class="small">Tài liệu được lưu trong thư viện và có thể tra cứu sau khi tải lại trang.</p></div>
       <label class="file-field">${icon('upload', 22)}<span><strong>Chọn tệp tài liệu</strong><small>PDF, DOCX, TXT UTF-8 · tối đa 10 MB mỗi tệp</small></span>
         <input type="file" name="files" accept=".pdf,.docx,.txt" multiple required ${upload.busy ? 'disabled' : ''}></label>
       <div class="form-row">
@@ -147,10 +156,13 @@ export function libraryView({ documents, selectedDocument, upload }) {
     </form>
     <section class="panel table-card">
       <div class="section-title"><h2>Danh sách tài liệu</h2><span class="pill neutral">${documents.length} tài liệu</span></div>
+      ${libraryLoading ? '<p class="empty" role="status">Đang tải thư viện…</p>' : ''}
+      ${libraryError ? `<p class="empty notice-error" role="alert">${escape(libraryError)}
+        <button type="button" class="text-button" data-action="reload-library">Thử lại</button></p>` : ''}
       <div class="table-scroll" tabindex="0" role="region" aria-label="Danh sách tài liệu"><table>
         <thead><tr><th scope="col">Tài liệu</th><th scope="col">Miền</th><th scope="col">Chia đoạn</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead>
         <tbody>${documents.map((item) => `<tr>
-          <td><strong>${escape(item.title)}</strong><small>${escape(item.sample ? item.name : 'Tệp đã thêm trong phiên')}</small></td>
+          <td><strong>${escape(item.title)}</strong><small>${escape(item.sample ? item.name : 'Tệp đã nhập')}</small></td>
           <td>${domains[item.domain]}</td><td>${strategies[item.strategy]}</td>
           <td><span class="pill ${item.needsOcr ? 'caution' : 'success'}">${icon(item.needsOcr ? 'warning' : 'check', 13)}
             ${item.needsOcr ? 'Cần OCR' : 'Đã xử lý'}</span></td>
@@ -160,34 +172,37 @@ export function libraryView({ documents, selectedDocument, upload }) {
       </table></div>
     </section>
     <section class="panel document-preview" id="document-preview" tabindex="-1" ${doc ? '' : 'hidden'}>
-      ${doc ? `<div class="section-title"><h2>${escape(doc.title)}</h2><span class="pill neutral">${chunks.length} đoạn</span></div>
-        ${chunks.length ? `<ol class="passages">${chunks.map((chunk) => `<li><strong>${location(chunk)}</strong>
-          <p class="serif">${escape(chunk.quote)}</p></li>`).join('')}</ol>` : '<p>Hãy chạy OCR để tạo lớp văn bản trước khi tra cứu tài liệu này.</p>'}` : ''}
+      ${doc ? `<div class="section-title"><h2>${escape(doc.title)}</h2>${sourceLink(doc.id)}
+        ${chunks ? `<span class="pill neutral">${chunks.length} đoạn</span>` : ''}</div>
+        ${selectedDocument.error ? `<p class="notice notice-error" role="alert">${escape(selectedDocument.error)}</p>` : ''}
+        ${!chunks && !selectedDocument.error ? '<p class="small" role="status">Đang tải trích đoạn…</p>' : ''}
+        ${chunks?.length ? `<ol class="passages">${chunks.map((chunk) => `<li><strong>${location(chunk)}</strong>
+          <p class="serif">${escape(chunk.quote)}</p></li>`).join('')}</ol>` : ''}
+        ${chunks?.length === 0 ? '<p>Hãy chạy OCR để tạo lớp văn bản trước khi tra cứu tài liệu này.</p>' : ''}` : ''}
     </section>`;
 }
 
-export function compareView({ compareQuestion, comparison }) {
-  if (!comparison) return `${pageTitle('Đối chiếu', 'So sánh câu trả lời', 'Xem đoạn truy xuất và câu trả lời từ bộ mẫu cho cùng một câu hỏi.')}
-    ${queryForm('compare', compareQuestion, 'So sánh')}<p class="empty panel">Nhập câu hỏi để bắt đầu so sánh.</p>`;
-  const baseline = comparison.hits[0];
-  const index = comparison.hits.indexOf(comparison.source);
-  return `${pageTitle('Đối chiếu', 'So sánh câu trả lời', 'Xem đoạn truy xuất và câu trả lời từ bộ mẫu cho cùng một câu hỏi.')}
-    ${queryForm('compare', compareQuestion, 'So sánh')}
+export function compareView({ draft, result, controller, error }) {
+  const intro = `${pageTitle('Đối chiếu', 'So sánh câu trả lời', 'Đối chiếu đoạn xếp hạng đầu và câu trả lời đã lọc theo bằng chứng.')}
+    ${queryForm('compare', draft, 'So sánh')}${lookupStatus(controller, error)}`;
+  if (!result) return intro;
+  const baseline = result.hits[0];
+  return `${intro}
     <div class="compare-grid">
       <article class="panel comparison"><h2>Chỉ thuật toán</h2><p class="small">Đoạn có điểm truy xuất cao nhất</p>
         <p class="serif">${baseline ? `${escape(baseline.quote)} ${citeButton(0, 'rank')}` : 'Không có kết quả truy xuất.'}</p></article>
-      <article class="panel comparison"><h2>Trả lời từ bộ mẫu</h2><p class="small">Hiển thị khi tìm thấy đúng bằng chứng</p>
-        <p class="serif">${comparison.example ? `${escape(comparison.example.answer)} ${citeButton(index, 'rank')}` : 'Chưa có đáp án mẫu được nguồn hỗ trợ cho câu hỏi này.'}</p>
-        ${comparison.example ? `<span class="pill ${comparison.verified ? 'success' : 'neutral'}">${comparison.verified ? 'Đã đối chiếu nguồn' : 'Chưa đối chiếu nguồn'}</span>` : ''}
+      <article class="panel comparison"><h2>Trả lời trích xuất</h2><p class="small">Câu trả lời dựa trên văn bản gốc</p>
+        <p class="serif">${escape(result.answer.text)} ${result.answer.abstained ? '' : citeButton(result.citationIndex, 'rank')}</p>
+        ${result.verified ? '<span class="pill success">Đã đối chiếu trích đoạn</span>' : ''}
       </article>
     </div>
-    <section class="panel table-card"><div class="section-title"><h2>Đoạn truy xuất</h2><span class="pill neutral">${retrievers[comparison.config.retrieval]}</span></div>
-      ${comparison.hits.length ? `<div class="table-scroll" tabindex="0" role="region" aria-label="Đoạn truy xuất"><table>
+    <section class="panel table-card"><div class="section-title"><h2>Đoạn truy xuất</h2><span class="pill neutral">${retrievers[result.config.retrieval]}</span></div>
+      ${result.hits.length ? `<div class="table-scroll" tabindex="0" role="region" aria-label="Đoạn truy xuất"><table>
         <thead><tr><th scope="col">Hạng</th><th scope="col">Nguồn và trích đoạn</th><th scope="col">Điểm tương đối</th></tr></thead><tbody>
-        ${comparison.hits.map((hit, rank) => {
+        ${result.hits.map((hit, rank) => {
           const percent = Math.round(hit.score / baseline.score * 100);
           return `<tr id="rank-${rank}" tabindex="-1"><td>[${rank + 1}]</td><td><strong>${escape(hit.doc.name)}</strong>
-            <small>${location(hit)}</small><p>${escape(hit.quote)}</p></td>
+            <small>${location(hit)}</small><p>${escape(hit.quote)}</p>${sourceLink(hit.doc.id, hit.page)}</td>
             <td><meter aria-label="Điểm tương đối" min="0" max="100" value="${percent}">${percent}%</meter> ${percent}%</td></tr>`;
         }).join('')}</tbody></table></div>` : '<p class="empty">Chưa có đoạn phù hợp.</p>'}
     </section>`;
@@ -214,10 +229,12 @@ export function experimentView({ experiment, experimentDomain, labRows, labTopK,
       <div class="section-title"><h2>Kết quả đánh giá</h2><button class="button secondary" type="button" data-action="export" ${labRows ? '' : 'disabled'}>
         ${icon('download', 16)} Xuất CSV</button></div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="Kết quả đánh giá"><table>
-        <thead><tr><th scope="col">Cấu hình</th><th scope="col">Recall@${labTopK}</th><th scope="col">MRR</th><th scope="col">nDCG@${labTopK}</th><th scope="col">Đã đối chiếu</th></tr></thead>
+        <thead><tr><th scope="col">Cấu hình</th><th scope="col">Recall@${labTopK}</th><th scope="col">MRR</th><th scope="col">nDCG@${labTopK}</th><th scope="col">Trích dẫn đúng</th><th scope="col">Đã đối chiếu</th><th scope="col">Từ chối đúng</th></tr></thead>
         <tbody>${(labRows ?? []).map(({ label, stats }) => `<tr><td><strong>${label}</strong></td>
           <td>${metric(stats?.recall)}</td><td>${metric(stats?.mrr)}</td><td>${metric(stats?.ndcg)}</td>
-          <td>${stats ? `${stats.verified}/${stats.total}` : '—'}</td></tr>`).join('') || '<tr><td>Chưa chạy thí nghiệm</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>'}</tbody>
+          <td>${stats.positives ? `${stats.correct}/${stats.positives}` : '—'}</td>
+          <td>${stats.correct ? `${stats.verified}/${stats.correct}` : '—'}</td>
+          <td>${stats.negatives ? `${stats.abstentions}/${stats.negatives}` : '—'}</td></tr>`).join('') || '<tr><td colspan="7">Chưa chạy thí nghiệm</td></tr>'}</tbody>
       </table></div>
     </section>`;
 }
