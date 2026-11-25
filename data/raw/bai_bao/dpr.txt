@@ -1,0 +1,9 @@
+Mục 1. Truy xuất đoạn văn
+DPR dùng hai bộ mã hóa để biểu diễn câu hỏi và đoạn văn bằng véc-tơ dày.
+Điểm liên quan của DPR là tích vô hướng giữa hai véc-tơ.
+
+Mục 2. Vai trò của trình đọc
+Trình đọc tiếp nhận các đoạn đã truy xuất và chọn đoạn văn bản chứa đáp án.
+
+Nguồn tham khảo: Karpukhin và cộng sự, Dense Passage Retrieval for Open-Domain Question Answering, EMNLP 2020.
+https://aclanthology.org/2020.emnlp-main.550/

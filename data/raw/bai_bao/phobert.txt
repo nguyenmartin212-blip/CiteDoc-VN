@@ -1,0 +1,9 @@
+Mục 1. Dữ liệu tiền huấn luyện
+PhoBERT sử dụng khoảng 20 GB văn bản tiếng Việt chưa nén để tiền huấn luyện.
+Kho văn bản kết hợp Wikipedia tiếng Việt với dữ liệu tin tức tiếng Việt đã lọc trùng.
+
+Mục 2. Chuẩn bị văn bản
+Nhóm tác giả PhoBERT sử dụng RDRSegmenter để tách từ và câu trước khi áp dụng BPE.
+
+Nguồn tham khảo: Nguyen và Tuan Nguyen, PhoBERT, Findings of EMNLP 2020.
+https://aclanthology.org/2020.findings-emnlp.92/

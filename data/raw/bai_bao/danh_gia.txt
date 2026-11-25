@@ -1,0 +1,6 @@
+Mục 1. Xếp hạng đoạn bằng chứng
+Chất lượng xếp hạng đoạn bằng chứng được đo bằng nDCG@5.
+MRR là trung bình nghịch đảo thứ hạng của kết quả đúng đầu tiên.
+
+Mục 2. Chi phí truy vấn
+Thời gian xử lý được dùng để đo độ trễ của mỗi truy vấn.

@@ -1,0 +1,24 @@
+{"id":"test-qc-01","domain":"quy_che","question":"Phòng máy thực hành mở cửa vào ngày nào?","doc_id":"quy_che/phong_may.txt","page":null,"evidence":"Phòng máy thực hành mở cửa vào thứ ba và thứ năm."}
+{"id":"test-qc-02","domain":"quy_che","question":"Suất đặt chỗ ở phòng máy giữ được trong mấy phút?","doc_id":"quy_che/phong_may.txt","page":null,"evidence":"Suất giữ chỗ ở phòng máy có hiệu lực trong 20 phút."}
+{"id":"test-qc-03","domain":"quy_che","question":"Sinh vien gui thiet bi o dau?","doc_id":"quy_che/phong_may.txt","page":null,"evidence":"Sinh viên gửi thiết bị tại quầy trực ở tầng hai."}
+{"id":"test-qc-04","domain":"quy_che","question":"Nếu tới muộn thì phải làm gì để giữ chỗ ở phòng máy?","doc_id":"quy_che/phong_may.txt","page":null,"evidence":"Nếu đến muộn, sinh viên phải xác nhận lại với nhân viên trực phòng máy."}
+{"id":"test-qc-05","domain":"quy_che","question":"Phòng máy mở cửa vào những thứ nào và lịch của phòng đọc ra sao?","evidences":[{"doc_id":"quy_che/phong_may.txt","page":null,"evidence":"Phòng máy thực hành mở cửa vào thứ ba và thứ năm."},{"doc_id":"quy_che/phong_doc.txt","page":null,"evidence":"Phòng đọc mở cửa vào thứ hai và thứ sáu."}]}
+{"id":"test-qc-06","domain":"quy_che","question":"Số tiền phạt khi đến phòng máy quá giờ giữ chỗ là bao nhiêu?","evidences":[]}
+{"id":"test-qc-07","domain":"quy_che","question":"Được giữ bao nhiêu máy trong 20 phút?","evidences":[]}
+{"id":"test-qc-08","domain":"quy_che","question":"Phòng máy thực hành đóng cửa vào mấy giờ?","evidences":[]}
+{"id":"test-gt-01","domain":"giao_trinh","question":"Rò rỉ dữ liệu là gì?","doc_id":"giao_trinh/kiem_dinh.txt","page":null,"evidence":"Rò rỉ dữ liệu là tình huống mô hình học từ thông tin vốn không có sẵn tại thời điểm dự đoán."}
+{"id":"test-gt-02","domain":"giao_trinh","question":"Pipeline học các bước xử lý từ phần dữ liệu nào?","doc_id":"giao_trinh/kiem_dinh.txt","page":null,"evidence":"Pipeline giúp học các phép tiền xử lý từ phần dữ liệu huấn luyện trong từng lần đánh giá."}
+{"id":"test-gt-03","domain":"giao_trinh","question":"Nên chia dữ liệu trước hay sau khi chỉnh phép biến đổi?","doc_id":"giao_trinh/kiem_dinh.txt","page":null,"evidence":"Chia dữ liệu trước khi điều chỉnh phép biến đổi để hạn chế rò rỉ từ tập kiểm thử."}
+{"id":"test-gt-04","domain":"giao_trinh","question":"Sai so tuyet doi duoc dung de lam gi?","doc_id":"giao_trinh/hoi_quy.txt","page":null,"evidence":"Sai số tuyệt đối được dùng để đo độ lệch giữa dự đoán và quan sát."}
+{"id":"test-gt-05","domain":"giao_trinh","question":"Tập kiểm thử dùng để làm gì và cần chia dữ liệu vào thời điểm nào để tránh rò rỉ?","evidences":[{"doc_id":"giao_trinh/hoc_may.txt","page":null,"evidence":"Tập kiểm thử được dùng để đánh giá mô hình đã chọn trên dữ liệu chưa từng dùng để huấn luyện hay chọn mô hình."},{"doc_id":"giao_trinh/kiem_dinh.txt","page":null,"evidence":"Chia dữ liệu trước khi điều chỉnh phép biến đổi để hạn chế rò rỉ từ tập kiểm thử."}]}
+{"id":"test-gt-06","domain":"giao_trinh","question":"Giáo trình chọn tỷ lệ phần trăm nào cho tập kiểm thử?","evidences":[]}
+{"id":"test-gt-07","domain":"giao_trinh","question":"Mô hình hồi quy đã được huấn luyện trên bao nhiêu mẫu?","evidences":[]}
+{"id":"test-gt-08","domain":"giao_trinh","question":"Mô hình trong giáo trình chạy ở vị trí nào trong phòng thí nghiệm?","evidences":[]}
+{"id":"test-bb-01","domain":"bai_bao","question":"PhoBERT dùng bao nhiêu GB dữ liệu để tiền huấn luyện?","doc_id":"bai_bao/phobert.txt","page":null,"evidence":"PhoBERT sử dụng khoảng 20 GB văn bản tiếng Việt chưa nén để tiền huấn luyện."}
+{"id":"test-bb-02","domain":"bai_bao","question":"Nhóm PhoBERT dùng công cụ nào để tách từ?","doc_id":"bai_bao/phobert.txt","page":null,"evidence":"Nhóm tác giả PhoBERT sử dụng RDRSegmenter để tách từ và câu trước khi áp dụng BPE."}
+{"id":"test-bb-03","domain":"bai_bao","question":"Điểm liên quan của DPR là gì?","doc_id":"bai_bao/dpr.txt","page":null,"evidence":"Điểm liên quan của DPR là tích vô hướng giữa hai véc-tơ."}
+{"id":"test-bb-04","domain":"bai_bao","question":"DPR sử dụng mấy bộ mã hóa?","doc_id":"bai_bao/dpr.txt","page":null,"evidence":"DPR dùng hai bộ mã hóa để biểu diễn câu hỏi và đoạn văn bằng véc-tơ dày."}
+{"id":"test-bb-05","domain":"bai_bao","question":"PhoBERT tách từ bằng công cụ nào, còn DPR tính điểm liên quan bằng phép toán gì?","evidences":[{"doc_id":"bai_bao/phobert.txt","page":null,"evidence":"Nhóm tác giả PhoBERT sử dụng RDRSegmenter để tách từ và câu trước khi áp dụng BPE."},{"doc_id":"bai_bao/dpr.txt","page":null,"evidence":"Điểm liên quan của DPR là tích vô hướng giữa hai véc-tơ."}]}
+{"id":"test-bb-06","domain":"bai_bao","question":"PhoBERT mất bao nhiêu giờ để tiền huấn luyện?","evidences":[]}
+{"id":"test-bb-07","domain":"bai_bao","question":"DPR có mức phí bao nhiêu tiền cho mỗi lần truy vấn?","evidences":[]}
+{"id":"test-bb-08","domain":"bai_bao","question":"DPR được dùng để phân loại văn bản ở những lớp nào?","evidences":[]}
